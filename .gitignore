@@ -44,6 +44,8 @@ htmlcov/
 .coverage
 .coverage.*
 .cache
+.idea
+.vscode
 nosetests.xml
 coverage.xml
 *.cover
