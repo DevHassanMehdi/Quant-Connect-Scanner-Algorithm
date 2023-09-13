@@ -1,9 +1,22 @@
 {
-    "algorithm-language": "Python",
-    "parameters": {},
-    "description": "",
     "cloud-id": 15702851,
     "organization-id": "8fd00e1225788bfced0904876579804e",
+    "channel-id": "LOCAL-5354fc079a610406deb533bd87114f6b",
+    "description": "",
+    "algorithm-language": "Python",
+    "parameters": {},
     "python-venv": 1,
-    "uptime": 320
+    "uptime": 423,
+    "backtestGrid": {
+        "md": [
+            {
+                "chartName": "Benchmark",
+                "width": 12,
+                "height": 6,
+                "row": 1,
+                "column": 1,
+                "sort": 11
+            }
+        ]
+    }
 }
