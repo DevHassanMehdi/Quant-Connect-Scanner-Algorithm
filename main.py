@@ -2,6 +2,7 @@
 from AlgorithmImports import *
 # endregion
 from typing import List
+import time
 from datetime import datetime, timedelta
 from QuantConnect import *
 from QuantConnect.Algorithm import *
@@ -12,7 +13,7 @@ class ScannerAlgorithm(QCAlgorithm):
 	
 	def Initialize(self):
 		# Setting the start and end dates for the backtest
-		self.SetStartDate(2023, 9, 12)  # set the start date to 60 minutes ago
+		self.SetStartDate(2023, 9, 19)  # set the start date to 60 minutes ago
 		self.SetCash(100000)
 		self.SetBrokerageModel(BrokerageName.InteractiveBrokersBrokerage, AccountType.Cash)
 		
@@ -57,7 +58,7 @@ class ScannerAlgorithm(QCAlgorithm):
 		self.max_trade_size = 50000
 		self.interval_size = 1000
 		self.IT = 1000
-		self.duration = 30
+		self.duration = 5
 		
 		# Schedule function to run every second
 		self.Schedule.On(self.DateRules.EveryDay(),
@@ -90,9 +91,14 @@ class ScannerAlgorithm(QCAlgorithm):
 	
 	def ScanRussell3000(self):
 		self.Debug(f"Scanning US Equities Russel3000")
+		
+		# Store the potential tickers in a list
+		found_tickers = []
+		
 		# Loop through each symbol in the list of symbols
 		for security in self.ActiveSecurities.Values:
 			symbol = security.Symbol
+			
 			# Get the current trade bar for the symbol
 			trade_bar = self.ActiveSecurities[symbol]
 			if trade_bar is None:
@@ -106,11 +112,11 @@ class ScannerAlgorithm(QCAlgorithm):
 			if not self.V > 0:
 				continue
 			# Get the historic volume for the last hour (Hvol)
-			history = self.History(symbol, self.LM, Resolution.Minute)
+			history = self.History(symbol, self.LM, Resolution.Second)
 			try:
 				self.Hvol = history.loc[symbol].iloc[-1]['volume']
 			except KeyError:
-				self.Debug(f"Historic data not available for {symbol}")
+				# self.Debug(f"Historic data not available for {symbol}")
 				continue
 			
 			# Get the current market cap (MarketCap)
@@ -161,26 +167,46 @@ class ScannerAlgorithm(QCAlgorithm):
 			self.Y = self.VPnow / self.NMC
 			self.Z = self.C * self.NMC * self.VPnow / self.VPold
 			
-			# Now you have all the required information for each stock
-			self.Debug(
-				f"Symbol: {symbol}, "
-				f"P: {self.P}, "
-				f"V: {self.V}, "
-				f"Pr: {self.Pr}, "
-				f"Hvol: {self.Hvol}, "
-				f"Market Cap: {self.MarketCap}, "
-				f"NMC: {self.NMC}, "
-				f"Vsec: {self.Vsec}, "
-				f"Vt: {self.Vt}, "
-				f"Vmin: {self.Vmin}, "
-				f"VPnow: {self.VPnow}, "
-				f"VPold: {self.VPold}, "
-				f"MinDecline: {self.MinDecline}, "
-				f"ActualDescent: {self.ActualDescent}, "
-				f"Y: {self.Y}, "
-				f"Z: {self.Z}")
+			# # Now you have all the required information for each stock
+			# self.Debug(
+			# 	f"Symbol: {symbol}, "
+			# 	f"P: {self.P}, "
+			# 	f"V: {self.V}, "
+			# 	f"Pr: {self.Pr}, "
+			# 	f"Hvol: {self.Hvol}, "
+			# 	f"Market Cap: {self.MarketCap}, "
+			# 	f"NMC: {self.NMC}, "
+			# 	f"Vsec: {self.Vsec}, "
+			# 	f"Vt: {self.Vt}, "
+			# 	f"Vmin: {self.Vmin}, "
+			# 	f"VPnow: {self.VPnow}, "
+			# 	f"VPold: {self.VPold}, "
+			# 	f"MinDecline: {self.MinDecline}, "
+			# 	f"ActualDescent: {self.ActualDescent}, "
+			# 	f"Y: {self.Y}, "
+			# 	f"Z: {self.Z}")
 			
 			# Check if thresholds are met
 			if self.Y > self.Ya and self.Z > self.Za and actual_descent > min_decline:
-				# Place trade
-				self.Debug(f"Ticker Found: {symbol.Value}")
+				found_tickers.append(symbol)
+		# Place trade
+		
+		if found_tickers and len(found_tickers) == 1:
+			self.Debug(f"Ticker Found: {found_tickers[-1]}")
+			self.ExecuteTrade(found_tickers[-1])
+	
+	def ExecuteTrade(self, symbol):
+		self.Debug(f"Executing Trade on ticker: {symbol.Value}")
+		# Place bracket order to short the stock
+		self.MarketOrder(symbol, - self.trade_size)
+		self.StopMarketOrder(symbol, self.trade_size, self.Securities[symbol].Close * 1.02)
+		self.StopMarketOrder(symbol, self.trade_size, self.Securities[symbol].Close * 0.98)
+		time.sleep(self.duration)
+		self.ExitTrade()
+	
+	def ExitTrade(self):
+		self.Debug(f"Exiting Trade")
+		# Place buy order to exit the trade
+		for holding in self.Portfolio.Values:
+			if holding.Invested and holding.IsShort:
+				self.MarketOrder(holding.Symbol, abs(holding.Quantity))
