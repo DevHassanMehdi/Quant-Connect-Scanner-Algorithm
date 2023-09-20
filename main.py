@@ -13,6 +13,9 @@ import threading
 class ScannerAlgorithm(QCAlgorithm):
 	
 	def Initialize(self):
+		# Record the start time
+		start_time = time.time()
+		
 		# Setting the start and end dates for the backtest
 		self.SetStartDate(2023, 9, 19)  # set the start date to 60 minutes ago
 		self.SetCash(100000)
@@ -68,6 +71,10 @@ class ScannerAlgorithm(QCAlgorithm):
 		
 		# Create a lock for thread synchronization
 		self.lock = threading.Lock()
+		# Record the end time and calculate the execution time
+		end_time = time.time()
+		execution_time = end_time - start_time
+		self.Debug(f"Execution time: {execution_time} seconds")
 	
 	# Defining the CoarseSelectionFunction method that takes a coarse universe of symbols as input and returns a list of symbols
 	def CoarseSelectionFunction(self, coarse):
@@ -124,7 +131,7 @@ class ScannerAlgorithm(QCAlgorithm):
 			self.ExecuteTrade(found_tickers[0])
 	
 	def ProcessSymbol(self, symbol):
-		# self.Debug(f"Processing symbol: {symbol}")
+		self.Debug(f"Processing symbol: {symbol}")
 		# Get the current trade bar for the symbol
 		trade_bar = self.ActiveSecurities[symbol]
 		if trade_bar is None:
@@ -143,7 +150,7 @@ class ScannerAlgorithm(QCAlgorithm):
 			return
 		
 		# Get the historic volume for the last hour (Hvol)
-		history = self.History(symbol, self.LM, Resolution.Second)
+		history = self.History(symbol, self.LM, Resolution.Minute)
 		try:
 			self.Hvol = history.loc[symbol].iloc[-1]['volume']
 		except KeyError:
