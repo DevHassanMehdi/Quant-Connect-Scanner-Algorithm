@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from QuantConnect import *
 from QuantConnect.Algorithm import *
 from QuantConnect.Data.UniverseSelection import *
+import threading
 
 
 class ScannerAlgorithm(QCAlgorithm):
@@ -64,6 +65,9 @@ class ScannerAlgorithm(QCAlgorithm):
 		self.Schedule.On(self.DateRules.EveryDay(),
 						 self.TimeRules.Every(timedelta(minutes=1)),
 						 self.ScanRussell3000)
+		
+		# Create a lock for thread synchronization
+		self.lock = threading.Lock()
 	
 	# Defining the CoarseSelectionFunction method that takes a coarse universe of symbols as input and returns a list of symbols
 	def CoarseSelectionFunction(self, coarse):
@@ -95,105 +99,126 @@ class ScannerAlgorithm(QCAlgorithm):
 		# Store the potential tickers in a list
 		found_tickers = []
 		
+		# Create a list to hold the threads
+		threads = []
+		
 		# Loop through each symbol in the list of symbols
 		for security in self.ActiveSecurities.Values:
 			symbol = security.Symbol
 			
-			# Get the current trade bar for the symbol
-			trade_bar = self.ActiveSecurities[symbol]
-			if trade_bar is None:
-				continue
+			# Create a new thread for each symbol
+			thread = threading.Thread(target=self.ProcessSymbol, args=(symbol,))
 			
-			# Get the current market price for the symbol (P)
-			self.P = trade_bar.Close
-			if not self.P > 0:
-				continue
-			self.V = trade_bar.Volume
-			if not self.V > 0:
-				continue
-			# Get the historic volume for the last hour (Hvol)
-			history = self.History(symbol, self.LM, Resolution.Second)
-			try:
-				self.Hvol = history.loc[symbol].iloc[-1]['volume']
-			except KeyError:
-				# self.Debug(f"Historic data not available for {symbol}")
-				continue
+			# Add the thread to the list
+			threads.append(thread)
 			
-			# Get the current market cap (MarketCap)
-			fundamental = security.Fundamentals
-			if not fundamental:
-				continue
-			
-			self.MarketCap = fundamental.MarketCap / 1_000_000_000
-			
-			# Calculate the new market cap (NMC)
-			self.NMC = round((self.MarketCap) ** self.power_factor, 2)
-			
-			# Get the volume for the current second (Vsec)
-			current_second = self.Time.second
-			self.Vsec = self.V - self.volume_last_second.get(symbol, 0)
-			self.volume_last_second[symbol] = self.V
-			
-			# Get the exact time interval of the last "second" (Vt)
-			self.Vt = self.Time - timedelta(seconds=current_second)
-			
-			# Calculate Pr based on your reference time (e.g., 11:30 AM)
-			self.Tr = self.Time.replace(hour=11, minute=30, second=0, microsecond=0)
-			if self.Time == self.Tr:
-				self.Pr = self.P
-			else:
-				self.Pr = self.pr.get(symbol, 0)  # Use the previous Pr if not at reference time
-			
-			# Store the current Pr for the next iteration
-			self.pr[symbol] = self.P
-			
-			if not self.Pr > 0:
-				continue
-			
-			# Calculate Vmin
-			self.Vmin = self.Vsec / self.Vt.timestamp() * 60
-			
-			# Calculate VPnow
-			self.VPnow = self.Vmin * self.P * self.A / 1000
-			
-			# Calculate VPold
-			self.VPold = self.Pr * self.Hvol / 1000
-			
-			# Calculate MinDecline and ActualDescent
-			self.MinDecline = self.min_descent / self.NMC / 10000
-			self.ActualDescent = (self.Pr - self.P) / self.Pr
-			
-			# Calculate Y and Z
-			self.Y = self.VPnow / self.NMC
-			self.Z = self.C * self.NMC * self.VPnow / self.VPold
-			
-			# # Now you have all the required information for each stock
-			# self.Debug(
-			# 	f"Symbol: {symbol}, "
-			# 	f"P: {self.P}, "
-			# 	f"V: {self.V}, "
-			# 	f"Pr: {self.Pr}, "
-			# 	f"Hvol: {self.Hvol}, "
-			# 	f"Market Cap: {self.MarketCap}, "
-			# 	f"NMC: {self.NMC}, "
-			# 	f"Vsec: {self.Vsec}, "
-			# 	f"Vt: {self.Vt}, "
-			# 	f"Vmin: {self.Vmin}, "
-			# 	f"VPnow: {self.VPnow}, "
-			# 	f"VPold: {self.VPold}, "
-			# 	f"MinDecline: {self.MinDecline}, "
-			# 	f"ActualDescent: {self.ActualDescent}, "
-			# 	f"Y: {self.Y}, "
-			# 	f"Z: {self.Z}")
-			
-			# Check if thresholds are met
-			if self.Y > self.Ya and self.Z > self.Za and actual_descent > min_decline:
-				found_tickers.append(symbol)
-		# Place trade
+			# Start the thread
+			thread.start()
+		
+		# Wait for all threads to finish
+		for thread in threads:
+			thread.join()
 		
 		if found_tickers and len(found_tickers) == 1:
-			self.Debug(f"Ticker Found: {found_tickers[-1]}")
-			self.ExecuteTrade(found_tickers[-1])
+			self.Debug(f"Ticker Found: {found_tickers[0]}")
+			self.ExecuteTrade(found_tickers[0])
+	
+	def ProcessSymbol(self, symbol):
+		# self.Debug(f"Processing symbol: {symbol}")
+		# Get the current trade bar for the symbol
+		trade_bar = self.ActiveSecurities[symbol]
+		if trade_bar is None:
+			# self.Debug(f"Symbol Trade_Bar not Found")
+			return
+		
+		# Get the current market price for the symbol (P)
+		self.P = trade_bar.Close
+		if not self.P > 0:
+			# self.Debug(f"Symbol current price is 0")
+			return
+		
+		self.V = trade_bar.Volume
+		if not self.V > 0:
+			# self.Debug(f"Symbol current volume is 0")
+			return
+		
+		# Get the historic volume for the last hour (Hvol)
+		history = self.History(symbol, self.LM, Resolution.Second)
+		try:
+			self.Hvol = history.loc[symbol].iloc[-1]['volume']
+		except KeyError:
+			# self.Debug(f"Symbol has not history data")
+			return
+		
+		# Get the current market cap (MarketCap)
+		fundamental = security.Fundamentals
+		if not fundamental:
+			# self.Debug(f"Symbol has no fundamental data")
+			return
+		
+		self.MarketCap = fundamental.MarketCap / 1_000_000_000
+		
+		# Calculate the new market cap (NMC)
+		self.NMC = round((self.MarketCap) ** self.power_factor, 2)
+		
+		# Get the volume for the current second (Vsec)
+		current_second = self.Time.second
+		self.Vsec = self.V - self.volume_last_second.get(symbol, 0)
+		self.volume_last_second[symbol] = self.V
+		
+		# Get the exact time interval of the last "second" (Vt)
+		self.Vt = self.Time - timedelta(seconds=current_second)
+		
+		# Calculate Pr based on your reference time (e.g., 11:30 AM)
+		self.Tr = self.Time.replace(hour=11, minute=30, second=0, microsecond=0)
+		if self.Time == self.Tr:
+			self.Pr = self.P
+		else:
+			self.Pr = self.pr.get(symbol, 0)  # Use the previous Pr if not at reference time
+		
+		# Store the current Pr for the next iteration
+		self.pr[symbol] = self.P
+		if not self.Pr > 0:
+			return
+		
+		# Calculate Vmin
+		self.Vmin = self.Vsec / self.Vt.timestamp() * 60
+		
+		# Calculate VPnow
+		self.VPnow = self.Vmin * self.P * self.A / 1000
+		
+		# Calculate VPold
+		self.VPold = self.Pr * self.Hvol / 1000
+		
+		# Calculate MinDecline and ActualDescent
+		self.MinDecline = self.min_descent / self.NMC / 10000
+		self.ActualDescent = (self.Pr - self.P) / self.Pr
+		
+		# Calculate Y and Z
+		self.Y = self.VPnow / self.NMC
+		self.Z = self.C * self.NMC * self.VPnow / self.VPold
+		
+		# Check if thresholds are met
+		if self.Y > self.Ya and self.Z > self.Za and actual_descent > min_decline:
+			# Now you have all the required information for each stock
+			self.Debug(
+				f"Potential Ticker: {symbol}, "
+				f"P: {self.P}, "
+				f"V: {self.V}, "
+				f"Pr: {self.Pr}, "
+				f"Hvol: {self.Hvol}, "
+				f"Market Cap: {self.MarketCap}, "
+				f"NMC: {self.NMC}, "
+				f"Vsec: {self.Vsec}, "
+				f"Vt: {self.Vt}, "
+				f"Vmin: {self.Vmin}, "
+				f"VPnow: {self.VPnow}, "
+				f"VPold: {self.VPold}, "
+				f"MinDecline: {self.MinDecline}, "
+				f"ActualDescent: {self.ActualDescent}, "
+				f"Y: {self.Y}, "
+				f"Z: {self.Z}")
+			found_tickers.append(symbol)
 	
 	def ExecuteTrade(self, symbol):
 		self.Debug(f"Executing Trade on ticker: {symbol.Value}")
