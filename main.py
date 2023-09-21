@@ -12,7 +12,7 @@ class ScannerAlgorithm(QCAlgorithm):
 	
 	def Initialize(self):
 		# Setting the start and end dates for the backtest
-		self.SetStartDate(2023, 9, 12)  # set the start date to 60 minutes ago
+		self.SetStartDate(2023, 9, 20)  # set the start date to 60 minutes ago
 		self.SetCash(100000)
 		self.SetBrokerageModel(BrokerageName.InteractiveBrokersBrokerage, AccountType.Cash)
 		
@@ -90,6 +90,10 @@ class ScannerAlgorithm(QCAlgorithm):
 	
 	def ScanRussell3000(self):
 		self.Debug(f"Scanning US Equities Russel3000")
+		
+		# Store the processed symbols that can a potetial ticker in a list
+		found_tickers = []
+		
 		# Loop through each symbol in the list of symbols
 		for security in self.ActiveSecurities.Values:
 			symbol = security.Symbol
@@ -106,7 +110,7 @@ class ScannerAlgorithm(QCAlgorithm):
 			if not self.V > 0:
 				continue
 			# Get the historic volume for the last hour (Hvol)
-			history = self.History(symbol, self.LM, Resolution.Minute)
+			history = self.History(symbol, self.LM, Resolution.Hour)
 			try:
 				self.Hvol = history.loc[symbol].iloc[-1]['volume']
 			except KeyError:
@@ -127,9 +131,13 @@ class ScannerAlgorithm(QCAlgorithm):
 			current_second = self.Time.second
 			self.Vsec = self.V - self.volume_last_second.get(symbol, 0)
 			self.volume_last_second[symbol] = self.V
+			if self.Vsec <= 0:
+				continue
 			
 			# Get the exact time interval of the last "second" (Vt)
-			self.Vt = self.Time - timedelta(seconds=current_second)
+			self.Vt = datetime.now().second - self.Time.second
+			if self.Vt <= 0:
+				continue
 			
 			# Calculate Pr based on your reference time (e.g., 11:30 AM)
 			self.Tr = self.Time.replace(hour=11, minute=30, second=0, microsecond=0)
@@ -145,7 +153,7 @@ class ScannerAlgorithm(QCAlgorithm):
 				continue
 			
 			# Calculate Vmin
-			self.Vmin = self.Vsec / self.Vt.timestamp() * 60
+			self.Vmin = self.Vsec / self.Vt * 60
 			
 			# Calculate VPnow
 			self.VPnow = self.Vmin * self.P * self.A / 1000
@@ -171,7 +179,9 @@ class ScannerAlgorithm(QCAlgorithm):
 				f"Market Cap: {self.MarketCap}, "
 				f"NMC: {self.NMC}, "
 				f"Vsec: {self.Vsec}, "
-				f"Vt: {self.Vt}, "
+				f"Vt: {self.Vt}")
+			
+			self.Debug(
 				f"Vmin: {self.Vmin}, "
 				f"VPnow: {self.VPnow}, "
 				f"VPold: {self.VPold}, "
@@ -181,6 +191,42 @@ class ScannerAlgorithm(QCAlgorithm):
 				f"Z: {self.Z}")
 			
 			# Check if thresholds are met
-			if self.Y > self.Ya and self.Z > self.Za and actual_descent > min_decline:
-				# Place trade
-				self.Debug(f"Ticker Found: {symbol.Value}")
+			if self.Y > self.Ya and self.Z > self.Za and self.ActualDescent > self.MinDecline:
+				# # Now you have all the required information for each stock
+				self.Debug(
+					f"Potential Ticker: {symbol}, "
+					f"P: {self.P}, "
+					f"V: {self.V}, "
+					f"Pr: {self.Pr}, "
+					f"Hvol: {self.Hvol}, "
+					f"Market Cap: {self.MarketCap}, "
+					f"NMC: {self.NMC}, "
+					f"Vsec: {self.Vsec}, "
+					f"Vt: {self.Vt}, "
+					f"Vmin: {self.Vmin}, "
+					f"VPnow: {self.VPnow}, "
+					f"VPold: {self.VPold}, "
+					f"MinDecline: {self.MinDecline}, "
+					f"ActualDescent: {self.ActualDescent}, "
+					f"Y: {self.Y}, "
+					f"Z: {self.Z}")
+				found_tickers.append(symbol)
+		
+		if found_tickers and len(found_tickers) == 1:
+			self.ExecuteTrade(self, found_tickers[0])
+	
+	def ExecuteTrade(self, symbol):
+		self.Debug(f"Executing Trade on ticker: {symbol.Value}")
+		# Place bracket order to short the stock
+		self.MarketOrder(symbol, - self.trade_size)
+		self.StopMarketOrder(symbol, self.trade_size, self.Securities[symbol].Close * 1.02)
+		self.StopMarketOrder(symbol, self.trade_size, self.Securities[symbol].Close * 0.98)
+		time.sleep(self.duration)
+		self.ExitTrade()
+	
+	def ExitTrade(self):
+		self.Debug(f"Exiting Trade")
+		# Place buy order to exit the trade
+		for holding in self.Portfolio.Values:
+			if holding.Invested and holding.IsShort:
+				self.MarketOrder(holding.Symbol, abs(holding.Quantity))
