@@ -17,7 +17,7 @@ class ScannerAlgorithm(QCAlgorithm):
 		start_time = time.time()
 		
 		# Setting the start and end dates for the backtest
-		self.SetStartDate(2023, 9, 19)  # set the start date to 60 minutes ago
+		self.SetStartDate(2023, 9, 12)  # set the start date to 60 minutes ago
 		self.SetCash(100000)
 		self.SetBrokerageModel(BrokerageName.InteractiveBrokersBrokerage, AccountType.Cash)
 		
@@ -98,7 +98,7 @@ class ScannerAlgorithm(QCAlgorithm):
 						x.MarketCap >= self.min_market_cap * 1000000000 and
 						x.MarketCap <= self.max_market_cap * 1000000000]
 		self.Debug(f"fine objects: {len(fine_objects)}")
-		return fine_objects
+		return fine_objects[:10]
 	
 	def ScanRussell3000(self):
 		self.Debug(f"Scanning US Equities Russel3000")
@@ -135,18 +135,18 @@ class ScannerAlgorithm(QCAlgorithm):
 		# Get the current trade bar for the symbol
 		trade_bar = self.ActiveSecurities[symbol]
 		if trade_bar is None:
-			# self.Debug(f"Symbol Trade_Bar not Found")
+			self.Debug(f"Symbol Trade_Bar not Found")
 			return
 		
 		# Get the current market price for the symbol (P)
 		self.P = trade_bar.Close
 		if not self.P > 0:
-			# self.Debug(f"Symbol current price is 0")
+			# self.Debug(f"Symbol current price is {self.P}")
 			return
 		
 		self.V = trade_bar.Volume
 		if not self.V > 0:
-			# self.Debug(f"Symbol current volume is 0")
+			self.Debug(f"Symbol current volume is {self.V}")
 			return
 		
 		# Get the historic volume for the last hour (Hvol)
@@ -154,13 +154,13 @@ class ScannerAlgorithm(QCAlgorithm):
 		try:
 			self.Hvol = history.loc[symbol].iloc[-1]['volume']
 		except KeyError:
-			# self.Debug(f"Symbol has not history data")
+			self.Debug(f"Symbol has not history data")
 			return
 		
 		# Get the current market cap (MarketCap)
 		fundamental = security.Fundamentals
 		if not fundamental:
-			# self.Debug(f"Symbol has no fundamental data")
+			self.Debug(f"Symbol has no fundamental data")
 			return
 		
 		self.MarketCap = fundamental.MarketCap / 1_000_000_000
@@ -186,6 +186,7 @@ class ScannerAlgorithm(QCAlgorithm):
 		# Store the current Pr for the next iteration
 		self.pr[symbol] = self.P
 		if not self.Pr > 0:
+			self.Debug(f"Cannot get price at the reference time. {self.Pr}")
 			return
 		
 		# Calculate Vmin
@@ -205,26 +206,31 @@ class ScannerAlgorithm(QCAlgorithm):
 		self.Y = self.VPnow / self.NMC
 		self.Z = self.C * self.NMC * self.VPnow / self.VPold
 		
+		self.Debug(
+			f"Symbol: {symbol}, "
+			f"P: {self.P}, "
+			f"V: {self.V}, "
+			f"Pr: {self.Pr}, "
+			f"Hvol: {self.Hvol}, "
+			f"Market Cap: {self.MarketCap}, "
+			f"NMC: {self.NMC}, "
+			f"Vsec: {self.Vsec}, "
+			f"Vt: {self.Vt}")
+		
+		self.Debug(
+			f"Vmin: {self.Vmin}, "
+			f"VPnow: {self.VPnow}, "
+			f"VPold: {self.VPold}, "
+			f"MinDecline: {self.MinDecline}, "
+			f"ActualDescent: {self.ActualDescent}, "
+			f"Y: {self.Y}, "
+			f"Z: {self.Z}")
+		
+		time.sleep(1000)
+
 		# Check if thresholds are met
 		if self.Y > self.Ya and self.Z > self.Za and actual_descent > min_decline:
 			# Now you have all the required information for each stock
-			self.Debug(
-				f"Potential Ticker: {symbol}, "
-				f"P: {self.P}, "
-				f"V: {self.V}, "
-				f"Pr: {self.Pr}, "
-				f"Hvol: {self.Hvol}, "
-				f"Market Cap: {self.MarketCap}, "
-				f"NMC: {self.NMC}, "
-				f"Vsec: {self.Vsec}, "
-				f"Vt: {self.Vt}, "
-				f"Vmin: {self.Vmin}, "
-				f"VPnow: {self.VPnow}, "
-				f"VPold: {self.VPold}, "
-				f"MinDecline: {self.MinDecline}, "
-				f"ActualDescent: {self.ActualDescent}, "
-				f"Y: {self.Y}, "
-				f"Z: {self.Z}")
 			found_tickers.append(symbol)
 	
 	def ExecuteTrade(self, symbol):
