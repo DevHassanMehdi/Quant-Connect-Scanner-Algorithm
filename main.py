@@ -1,18 +1,21 @@
-# region imports
+# Import the necessary libraries
 from AlgorithmImports import *
-# endregion
 from typing import List
-from datetime import datetime, timedelta
+import datetime
 from QuantConnect import *
 from QuantConnect.Algorithm import *
 from QuantConnect.Data.UniverseSelection import *
 
 
+# Define the ScannerAlgorithm class that inherits from QCAlgorithm
 class ScannerAlgorithm(QCAlgorithm):
 	
 	def Initialize(self):
-		# Setting the start and end dates for the backtest
-		self.SetStartDate(2023, 9, 20)  # set the start date to 60 minutes ago
+		yesterday = datetime.datetime.today() - datetime.timedelta(days=1)
+		self.Debug(f"StartDate: {yesterday}")
+		
+		# Set the start and end dates for the backtest
+		self.SetStartDate(yesterday.year, yesterday.month, yesterday.day)  # set the start date to 60 minutes ago
 		self.SetCash(100000)
 		self.SetBrokerageModel(BrokerageName.InteractiveBrokersBrokerage, AccountType.Cash)
 		
@@ -20,7 +23,7 @@ class ScannerAlgorithm(QCAlgorithm):
 		self.russell3000 = self.AddUniverse(self.CoarseSelectionFunction, self.FineSelectionFunction)
 		
 		# Define constants
-		self.Tr = datetime.strptime('11:30:00', '%H:%M:%S').time()
+		self.Tr = datetime.datetime.strptime('11:30:00', '%H:%M:%S').time()
 		self.LM = 60
 		self.A = 0.3
 		self.C = 2500
@@ -52,6 +55,7 @@ class ScannerAlgorithm(QCAlgorithm):
 		self.Za = 0.5
 		self.pr = {}
 		self.volume_last_second = {}
+		
 		# Define broker configurations
 		self.trade_size = 0.1
 		self.max_trade_size = 50000
@@ -59,14 +63,14 @@ class ScannerAlgorithm(QCAlgorithm):
 		self.IT = 1000
 		self.duration = 30
 		
-		# Schedule function to run every second
+		# Schedule function to run at a specific time
 		self.Schedule.On(self.DateRules.EveryDay(),
 						 self.TimeRules.Every(timedelta(minutes=1)),
 						 self.ScanRussell3000)
 	
-	# Defining the CoarseSelectionFunction method that takes a coarse universe of symbols as input and returns a list of symbols
+	# Define the CoarseSelectionFunction method that takes a coarse universe of symbols as input and returns a list of symbols
 	def CoarseSelectionFunction(self, coarse):
-		# Filter the coarse universe to include only US equities with market cap between 3- billion
+		# Filter the coarse universe to include only US equities with market cap between 3-6 billion
 		filtered = [x for x in coarse if
 					x.HasFundamentalData and
 					x.Price > 5 and
@@ -89,39 +93,43 @@ class ScannerAlgorithm(QCAlgorithm):
 		return fine_objects
 	
 	def ScanRussell3000(self):
+		# Debugging message
 		self.Debug(f"Scanning US Equities Russel3000")
 		
-		# Store the processed symbols that can a potetial ticker in a list
+		# Store the processed symbols that can a potential ticker in a list
 		found_tickers = []
 		
 		# Loop through each symbol in the list of symbols
 		for security in self.ActiveSecurities.Values:
 			symbol = security.Symbol
-			# Get the current trade bar for the symbol
-			trade_bar = self.ActiveSecurities[symbol]
-			if trade_bar is None:
-				continue
-			
-			# Get the current market price for the symbol (P)
-			self.P = trade_bar.Close
-			if not self.P > 0:
-				continue
-			self.V = trade_bar.Volume
-			if not self.V > 0:
-				continue
-			# Get the historic volume for the last hour (Hvol)
-			history = self.History(symbol, self.LM, Resolution.Hour)
-			try:
-				self.Hvol = history.loc[symbol].iloc[-1]['volume']
-			except KeyError:
-				self.Debug(f"Historic data not available for {symbol}")
-				continue
-			
 			# Get the current market cap (MarketCap)
 			fundamental = security.Fundamentals
 			if not fundamental:
 				continue
 			
+			# Get the trade bar data for the stock
+			history = self.History(symbol, self.LM, Resolution.Minute)
+			if history.empty:
+				self.Debug(f"Historic data not available for {symbol}")
+				continue
+			
+			# Get the current market price for the symbol (P)
+			self.P = history.loc[symbol].iloc[-1]['close']
+			# self.Debug(f"P: {symbol}, {self.P}")
+			if not self.P > 0:
+				continue
+			
+			self.V = history.loc[symbol].iloc[-1]['volume']
+			# self.Debug(f"V: {symbol}, {self.V}")
+			if not self.V > 0:
+				continue
+			
+			self.Hvol = self.Hvol = self.History(symbol, self.LM, Resolution.Minute)['volume'].sum()
+			# self.Debug(f"Hvol of 60 Minutes: {symbol}, {self.Hvol}")
+			if not self.Hvol or not self.Hvol > 0:
+				continue
+			
+			# Get the market cap
 			self.MarketCap = fundamental.MarketCap / 1_000_000_000
 			
 			# Calculate the new market cap (NMC)
@@ -131,11 +139,13 @@ class ScannerAlgorithm(QCAlgorithm):
 			current_second = self.Time.second
 			self.Vsec = self.V - self.volume_last_second.get(symbol, 0)
 			self.volume_last_second[symbol] = self.V
+			# self.Debug(f"Vsec: {symbol}, {self.Vsec}")
+			
 			if self.Vsec <= 0:
 				continue
 			
 			# Get the exact time interval of the last "second" (Vt)
-			self.Vt = datetime.now().second - self.Time.second
+			self.Vt = datetime.datetime.now().second - self.Time.second
 			if self.Vt <= 0:
 				continue
 			
@@ -192,32 +202,16 @@ class ScannerAlgorithm(QCAlgorithm):
 			
 			# Check if thresholds are met
 			if self.Y > self.Ya and self.Z > self.Za and self.ActualDescent > self.MinDecline:
-				# # Now you have all the required information for each stock
-				self.Debug(
-					f"Potential Ticker: {symbol}, "
-					f"P: {self.P}, "
-					f"V: {self.V}, "
-					f"Pr: {self.Pr}, "
-					f"Hvol: {self.Hvol}, "
-					f"Market Cap: {self.MarketCap}, "
-					f"NMC: {self.NMC}, "
-					f"Vsec: {self.Vsec}, "
-					f"Vt: {self.Vt}, "
-					f"Vmin: {self.Vmin}, "
-					f"VPnow: {self.VPnow}, "
-					f"VPold: {self.VPold}, "
-					f"MinDecline: {self.MinDecline}, "
-					f"ActualDescent: {self.ActualDescent}, "
-					f"Y: {self.Y}, "
-					f"Z: {self.Z}")
+				# Append the symbol to the list of found tickers
 				found_tickers.append(symbol)
 		
+		# If only one ticker is found, execute the trade
 		if found_tickers and len(found_tickers) == 1:
 			self.ExecuteTrade(self, found_tickers[0])
 	
 	def ExecuteTrade(self, symbol):
+		# Place a bracket order to short the stock
 		self.Debug(f"Executing Trade on ticker: {symbol.Value}")
-		# Place bracket order to short the stock
 		self.MarketOrder(symbol, - self.trade_size)
 		self.StopMarketOrder(symbol, self.trade_size, self.Securities[symbol].Close * 1.02)
 		self.StopMarketOrder(symbol, self.trade_size, self.Securities[symbol].Close * 0.98)
@@ -225,8 +219,8 @@ class ScannerAlgorithm(QCAlgorithm):
 		self.ExitTrade()
 	
 	def ExitTrade(self):
+		# Place a buy order to exit the trade
 		self.Debug(f"Exiting Trade")
-		# Place buy order to exit the trade
 		for holding in self.Portfolio.Values:
 			if holding.Invested and holding.IsShort:
 				self.MarketOrder(holding.Symbol, abs(holding.Quantity))
