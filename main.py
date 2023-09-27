@@ -11,7 +11,7 @@ from QuantConnect.Data.UniverseSelection import *
 class ScannerAlgorithm(QCAlgorithm):
 	
 	def Initialize(self):
-		yesterday = datetime.datetime.today() - datetime.timedelta(days=1)
+		yesterday = datetime.datetime.today() - datetime.timedelta(days=2)
 		self.Debug(f"StartDate: {yesterday}")
 		
 		# Set the start and end dates for the backtest
@@ -23,7 +23,7 @@ class ScannerAlgorithm(QCAlgorithm):
 		self.russell3000 = self.AddUniverse(self.CoarseSelectionFunction, self.FineSelectionFunction)
 		
 		# Define constants
-		self.Tr = datetime.datetime.strptime('11:30:00', '%H:%M:%S').time()
+		self.Tr = self.Time.replace(hour=11, minute=30, second=0, microsecond=0)
 		self.LM = 60
 		self.A = 0.3
 		self.C = 2500
@@ -140,17 +140,16 @@ class ScannerAlgorithm(QCAlgorithm):
 			self.Vsec = self.V - self.volume_last_second.get(symbol, 0)
 			self.volume_last_second[symbol] = self.V
 			# self.Debug(f"Vsec: {symbol}, {self.Vsec}")
-			
 			if self.Vsec <= 0:
 				continue
 			
 			# Get the exact time interval of the last "second" (Vt)
-			self.Vt = datetime.datetime.now().second - self.Time.second
+			self.Vt = datetime.datetime.now().second - current_second
+			# self.Debug(f"Vt: {symbol}, {self.Vt}")
 			if self.Vt <= 0:
 				continue
 			
 			# Calculate Pr based on your reference time (e.g., 11:30 AM)
-			self.Tr = self.Time.replace(hour=11, minute=30, second=0, microsecond=0)
 			if self.Time == self.Tr:
 				self.Pr = self.P
 			else:
@@ -158,7 +157,8 @@ class ScannerAlgorithm(QCAlgorithm):
 			
 			# Store the current Pr for the next iteration
 			self.pr[symbol] = self.P
-			
+			self.Debug(f"Pr: {symbol}, {self.Pr}")
+
 			if not self.Pr > 0:
 				continue
 			
