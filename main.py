@@ -11,11 +11,11 @@ from QuantConnect.Data.UniverseSelection import *
 class ScannerAlgorithm(QCAlgorithm):
 	
 	def Initialize(self):
-		yesterday = datetime.datetime.today() - datetime.timedelta(days=2)
+		yesterday = datetime.datetime.today() - datetime.timedelta(days=1)
 		self.Debug(f"StartDate: {yesterday}")
 		
 		# Set the start and end dates for the backtest
-		self.SetStartDate(yesterday.year, yesterday.month, yesterday.day)  # set the start date to 60 minutes ago
+		self.SetStartDate(yesterday)  # set the start date to 60 minutes ago
 		self.SetCash(100000)
 		self.SetBrokerageModel(BrokerageName.InteractiveBrokersBrokerage, AccountType.Cash)
 		
@@ -108,7 +108,7 @@ class ScannerAlgorithm(QCAlgorithm):
 				continue
 			
 			# Get the trade bar data for the stock
-			history = self.History(symbol, self.LM, Resolution.Minute)
+			history = self.History(symbol, self.LM, Resolution.Second)
 			if history.empty:
 				self.Debug(f"Historic data not available for {symbol}")
 				continue
@@ -119,9 +119,12 @@ class ScannerAlgorithm(QCAlgorithm):
 			if not self.P > 0:
 				continue
 			
-			self.V = history.loc[symbol].iloc[-1]['volume']
-			# self.Debug(f"V: {symbol}, {self.V}")
-			if not self.V > 0:
+			try:
+				self.V = history.loc[symbol].iloc[-1]['volume']
+				# self.Debug(f"V: {symbol}, {self.V}")
+				if not self.V > 0:
+					continue
+			except KeyError:
 				continue
 			
 			self.Hvol = self.Hvol = self.History(symbol, self.LM, Resolution.Minute)['volume'].sum()
@@ -157,8 +160,7 @@ class ScannerAlgorithm(QCAlgorithm):
 			
 			# Store the current Pr for the next iteration
 			self.pr[symbol] = self.P
-			self.Debug(f"Pr: {symbol}, {self.Pr}")
-
+			# self.Debug(f"Pr: {symbol}, {self.Pr}")
 			if not self.Pr > 0:
 				continue
 			
